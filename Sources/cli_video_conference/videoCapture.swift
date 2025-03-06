@@ -3,7 +3,7 @@ import CoreImage
 import VideoToolbox
 
 class VideoCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-  private var captureSession = AVCaptureSession()
+  private let captureSession = AVCaptureSession()
   var frameCallback: ((CMSampleBuffer) -> Void)?
 
   func startCapture() {
@@ -33,10 +33,7 @@ class VideoCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
   }
 
   func stopCaptue() {
-    self.captureSession.stopRunning()  // Stop capturing video
-    self.captureSession = nil  // Release session
-    self.previewLayer = nil  // Remove preview layer reference
-    self.window = nil  // Close window reference
+    captureSession.stopRunning()  // Stop capturing video
     print("Camera preview stopped.")
 
   }
