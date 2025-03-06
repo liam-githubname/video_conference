@@ -8,6 +8,9 @@ enum Command: String {
   case help = "help"
   case list = "list"
   case preview = "preview"
+  case conference = "conference"
+  case sender = "sender"
+  case receiver = "receiver"
 }
 
 // I don't think this is important
@@ -63,6 +66,16 @@ class CameraStreamCLI {
     case .preview:
       let cameraPreviewController = CameraPreviewController()
       cameraPreviewController.run()
+    case .conference:
+      break
+    // FIXME: Need to dynamically update host ip addr
+    case .sender:
+      let sender = VideoSender(host: "127.0.0.1", port: 8111)
+      sender.start()
+      RunLoop.main.run()
+    case .receiver:
+      let appDelegate = AppDelegate()
+      appDelegate.run()
     }
   }
 

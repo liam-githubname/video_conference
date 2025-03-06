@@ -1,157 +1,156 @@
 import AVFoundation
+import Cocoa
 import Network
 
-class VideoStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-    private var captureSession: AVCaptureSession!
-    private var connection: NWConnection?
-    private var compressionSession: VTCompressionSession?
+class VideoReceiver {
+  var listener: NWListener?
+  var imageView: NSImageView
 
-    init(ip: String, port: UInt16) {
-        super.init()
-        setupConnection(ip: ip, port: port)
-        setupCaptureSession()
+  init(port: UInt16, imageView: NSImageView) {
+    self.imageView = imageView
+
+    do {
+      let parameters = NWParameters.tcp
+      listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
+    } catch {
+      fatalError("❌ Failed to create listener: \(error)")
+    }
+  }
+
+  func start() {
+    listener?.newConnectionHandler = { connection in
+      print("🎉 Client connected")
+      connection.start(queue: .main)
+      self.receiveFrames(from: connection)
     }
 
-    private func setupConnection(ip: String, port: UInt16) {
-        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(ip), port: NWEndpoint.Port(integerLiteral: port))
-        connection = NWConnection(to: endpoint, using: .tcp)
-        connection?.start(queue: .global())
+    listener?.start(queue: .main)
+    print("✅ Server listening on port \(listener?.port?.rawValue ?? 0)")
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      if let boundPort = self.listener?.port?.rawValue {
+        print("✅ Server is officially listening on port \(boundPort)")
+      } else {
+        print("❌ Failed to retrieve bound port")
+      }
     }
+  }
 
-    private func setupCaptureSession() {
-        captureSession = AVCaptureSession()
-        captureSession.sessionPreset = .medium
+  private func receiveFrames(from connection: NWConnection) {
+    connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { sizeData, _, _, error in
+      if let sizeData = sizeData, sizeData.count == 4 {
+        let frameSize = sizeData.withUnsafeBytes { $0.load(as: UInt32.self) }
 
-        guard let camera = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: camera) else {
-            print("Failed to access camera")
-            return
+        connection.receive(minimumIncompleteLength: Int(frameSize), maximumLength: Int(frameSize)) {
+          frameData, _, _, error in
+          if let frameData = frameData {
+            print(frameData)
+            self.displayFrame(frameData)
+          }
+          if error == nil {
+            self.receiveFrames(from: connection)  // Keep receiving
+          }
         }
-
-        let output = AVCaptureVideoDataOutput()
-        output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
-
-        captureSession.addInput(input)
-        captureSession.addOutput(output)
-
-        setupCompressionSession()
-
-        captureSession.startRunning()
+      }
     }
+  }
 
-    private func setupCompressionSession() {
-        let width = 640, height = 480
-        VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264, encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: { _, frameStatus, flags, sampleBuffer, refCon in
-            if frameStatus == noErr, let sampleBuffer = sampleBuffer {
-                let streamer = Unmanaged<VideoStreamer>.fromOpaque(refCon!).takeUnretainedValue()
-                streamer.sendEncodedSampleBuffer(sampleBuffer)
-            }
-        }, refcon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()), compressionSessionOut: &compressionSession)
-
-        VTSessionSetProperty(compressionSession!, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-        VTCompressionSessionPrepareToEncodeFrames(compressionSession!)
+  private func displayFrame(_ frameData: Data) {
+    if let image = NSImage(data: frameData) {
+      DispatchQueue.main.async {
+        self.imageView.image = image
+      }
     }
-
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        VTCompressionSessionEncodeFrame(compressionSession!, imageBuffer: imageBuffer, presentationTimeStamp: timestamp, duration: .invalid, frameProperties: nil, sourceFrameRefcon: nil, infoFlagsOut: nil)
-    }
-
-    private func sendEncodedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
-        var length: Int = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: &length, totalLengthOut: &length, dataPointerOut: &dataPointer)
-
-        if let dataPointer = dataPointer {
-            let data = Data(bytes: dataPointer, count: length)
-            connection?.send(content: data, completion: .contentProcessed({ error in
-                if let error = error {
-                    print("Send failed: \(error)")
-                }
-            }))
-        }
-    }
+  }
 }
 
-public class VideoReceiver {
-    private var listener: NWListener?
-    private var connection: NWConnection?
-    private var displayLayer: AVSampleBufferDisplayLayer!
-    private var decompressionSession: VTDecompressionSession?
+class VideoSender {
+  let connection: NWConnection
+  let videoCapture = VideoCapture()
 
-    init(port: UInt16, displayLayer: AVSampleBufferDisplayLayer) {
-        self.displayLayer = displayLayer
-        setupListener(port: port)
-        setupDecompressionSession()
+  init(host: String, port: UInt16) {
+    connection = NWConnection(
+      host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)  // ✅ Switch to TCP
+  }
+
+  func start() {
+    connection.stateUpdateHandler = { newState in
+      switch newState {
+      case .ready:
+        print("✅ Connected to server!")
+        self.startStreaming()
+      case .failed(let error):
+        print("❌ Connection failed: \(error)")
+      default:
+        break
+      }
     }
 
-    private func setupListener(port: UInt16) {
-        do {
-            listener = try NWListener(using: .tcp, on: NWEndpoint.Port(integerLiteral: port))
-            listener?.newConnectionHandler = { [weak self] newConnection in
-                self?.connection = newConnection
-                newConnection.start(queue: .global())
-                self?.receiveData()
-            }
-            listener?.start(queue: .global())
-        } catch {
-            print("Failed to start listener: \(error)")
+    connection.start(queue: .main)
+  }
+
+  private func startStreaming() {
+    print("in start streaming")
+    videoCapture.frameCallback = { sampleBuffer in
+      print("In frameCallback")
+      if let jpegData = sampleBufferTOJPEGData(sampleBuffer) {
+        self.sendFrame(jpegData)
+      }
+    }
+    videoCapture.startCapture()
+  }
+
+  private func sendFrame(_ frameData: Data) {
+    print("In sendFrame")
+    let frameSize = UInt32(frameData.count)
+    var dataToSend = withUnsafeBytes(of: frameSize) { Data($0) }  // Send frame size first
+    dataToSend.append(frameData)  // Append actual frame data
+
+    connection.send(
+      content: dataToSend,
+      completion: .contentProcessed { error in
+        if let error = error {
+          print("❌ Send error: \(error)")
+        } else {
+          print("📤 Sent frame of size: \(frameData.count) bytes")
         }
-    }
+      })
+  }
+}
 
-    private func setupDecompressionSession() {
-        let width = 640, height = 480
-        var formatDescription: CMVideoFormatDescription?
-        CMVideoFormatDescriptionCreate(allocator: nil, codecType: kCMVideoCodecType_H264, width: Int32(width), height: Int32(height), extensions: nil, formatDescriptionOut: &formatDescription)
+class AppDelegate: NSObject, NSApplicationDelegate {
+  var window: NSWindow!
+  var receiver: VideoReceiver!
 
-        VTDecompressionSessionCreate(allocator: nil, formatDescription: formatDescription!, decoderSpecification: nil, imageBufferAttributes: nil, outputCallback: { _, status, flags, imageBuffer, timestamp, duration, refCon in
-            if status == noErr, let imageBuffer = imageBuffer {
-                let receiver = Unmanaged<VideoReceiver>.fromOpaque(refCon!).takeUnretainedValue()
-                receiver.displayDecodedFrame(imageBuffer, timestamp: timestamp)
-            }
-        }, refcon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()), decompressionSessionOut: &decompressionSession)
-    }
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    let screenSize = NSScreen.main?.frame.size ?? CGSize(width: 800, height: 600)
 
-    private func receiveData() {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536, completion: { [weak self] data, _, isComplete, error in
-            if let data = data, !data.isEmpty {
-                self?.decodeReceivedData(data)
-            }
-            if isComplete {
-                self?.connection?.cancel()
-            } else if error == nil {
-                self?.receiveData()
-            }
-        })
-    }
+    // Create Window
+    window = NSWindow(
+      contentRect: CGRect(x: 0, y: 0, width: 640, height: 480),
+      styleMask: [.titled, .closable, .resizable, .miniaturizable],
+      backing: .buffered,
+      defer: false
+    )
+    window.center()
+    window.title = "Video Stream"
+    window.makeKeyAndOrderFront(nil)
 
-    private func decodeReceivedData(_ data: Data) {
-        var blockBuffer: CMBlockBuffer?
-        CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: data.count, blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: data.count, flags: 0, blockBufferOut: &blockBuffer)
+    // Create ImageView
+    let imageView = NSImageView(frame: CGRect(x: 0, y: 0, width: 640, height: 480))
+    imageView.imageScaling = .scaleAxesIndependently
+    window.contentView?.addSubview(imageView)
 
-        if let blockBuffer = blockBuffer {
-            CMBlockBufferReplaceDataBytes(with: data, blockBuffer: blockBuffer, offsetIntoDestination: 0)
+    // Start Video Receiver
+    receiver = VideoReceiver(port: 8111, imageView: imageView)
+    receiver.start()
+  }
 
-            var sampleBuffer: CMSampleBuffer?
-            let sampleSizeArray: [Int] = [data.count]
-            CMSampleBufferCreateReady(allocator: nil, dataBuffer: blockBuffer, formatDescription: nil, sampleCount: 1, sampleTimingArray: nil, sampleSizeArray: sampleSizeArray, sampleBufferOut: &sampleBuffer)
-
-            if let sampleBuffer = sampleBuffer {
-                VTDecompressionSessionDecodeFrame(decompressionSession!, sampleBuffer: sampleBuffer, flags: [], frameRefcon: nil, infoFlagsOut: nil)
-            }
-        }
-    }
-
-    private func displayDecodedFrame(_ imageBuffer: CVImageBuffer, timestamp: CMTime) {
-        var timingInfo = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: timestamp, decodeTimeStamp: .invalid)
-        var sampleBuffer: CMSampleBuffer?
-
-        CMSampleBufferCreateForImageBuffer(allocator: nil, imageBuffer: imageBuffer, dataReady: true, makeDataReadyCallback: nil, refcon: nil, formatDescription: nil, sampleTiming: &timingInfo, sampleBufferOut: &sampleBuffer)
-
-        if let sampleBuffer = sampleBuffer {
-            displayLayer.enqueue(sampleBuffer)
-        }
-    }
+  func run() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.run()
+  }
 }
