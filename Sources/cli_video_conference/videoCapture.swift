@@ -3,48 +3,83 @@ import CoreImage
 import VideoToolbox
 
 class VideoCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-  private let captureSession = AVCaptureSession()
+  private var captureSession: AVCaptureSession?
   var frameCallback: ((CMSampleBuffer) -> Void)?
 
-  func startCapture() {
+  override init() {
+    super.init()
+    setupCaptureSession()
+  }
+
+  private func setupCaptureSession() {
+    let session = AVCaptureSession()
+    session.sessionPreset = .high
+
     guard let videoDevice = AVCaptureDevice.default(for: .video) else {
-      print("❌ No video device found")
+      print("Error: No video device available")
       return
     }
 
     do {
-      let videoInput = try AVCaptureDeviceInput(device: videoDevice)
-      if captureSession.canAddInput(videoInput) {
-        captureSession.addInput(videoInput)
+      let deviceInput = try AVCaptureDeviceInput(device: videoDevice)
+      if session.canAddInput(deviceInput) {
+        session.addInput(deviceInput)
+      } else {
+        print("Error: Could not add video device input to the session")
+        return
       }
 
       let videoOutput = AVCaptureVideoDataOutput()
       videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
 
-      if captureSession.canAddOutput(videoOutput) {
-        captureSession.addOutput(videoOutput)
+      if session.canAddOutput(videoOutput) {
+        session.addOutput(videoOutput)
+      } else {
+        print("Error: Could not add video data output to the session")
+        return
       }
 
-      captureSession.startRunning()
-      print("📷 Video capture started")
+      self.captureSession = session
     } catch {
-      print("❌ Error setting up video capture: \(error)")
+      print("Error: Could not create video device input: \(error.localizedDescription)")
     }
   }
 
-  func stopCaptue() {
-    captureSession.stopRunning()  // Stop capturing video
-    print("Camera preview stopped.")
-
+  func startCapture() {
+    print("Starting video capture...")
+    DispatchQueue.global(qos: .userInitiated).async {
+      self.captureSession?.startRunning()
+    }
   }
 
+  func stopCapture() {
+    captureSession?.stopRunning()
+  }
+
+  // AVCaptureVideoDataOutputSampleBufferDelegate method
   func captureOutput(
     _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
     from connection: AVCaptureConnection
   ) {
-    frameCallback?(sampleBuffer)  // Send frames to the network
+    frameCallback?(sampleBuffer)
   }
 }
+
+// Helper function to convert CMSampleBuffer to JPEG Data
+// func sampleBufferTOJPEGData(_ sampleBuffer: CMSampleBuffer) -> Data? {
+//     guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+//         return nil
+//     }
+//
+//     let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+//     let context = CIContext()
+//     guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
+//         return nil
+//     }
+//
+//     let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+//     return bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
+// }
 
 func sampleBufferTOJPEGData(_ sampleBuffer: CMSampleBuffer) -> Data? {
   print("In sampleBuffer")

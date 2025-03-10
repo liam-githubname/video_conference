@@ -15,16 +15,12 @@ let package = Package(
       targets: ["cli_video_conference"]
     )
   ],
-  dependencies: [
-    .package(url: "https://github.com/stasel/WebRTC.git", .upToNextMajor(from: "134.0.0"))
-  ],
+  dependencies: [],
   targets: [
     // Main program logic target.
     .executableTarget(
       name: "cli_video_conference",
-      dependencies: [
-        "WebRTC"
-      ],
+      dependencies: [],
       path: "Sources/cli_video_conference",
       swiftSettings: [
         .define("MACOS_10_15", .when(platforms: [.macOS]))  // Specify macOS 10.15 as minimum deployment target

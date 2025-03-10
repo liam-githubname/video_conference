@@ -13,29 +13,14 @@ enum Command: String {
   case receiver = "receiver"
 }
 
-// I don't think this is important
-enum CaptureFormat: String {
-  case jpeg = "jpeg"
-}
-
 // main app class
 @available(macOS 10.15, *)
 @MainActor  // Ensure all UI-related code runs on the main thread
 class CameraStreamCLI {
-  // capture session components
-  private var captureSession: AVCaptureSession?
-  private var videoOutput: AVCaptureVideoDataOutput?
-  private var currentDevice: AVCaptureDevice?
-
-  // gotta figure this part out
-  private var serverSocket: CFSocket?
-  private var clientConnections: [CFSocket] = []
-  private var streamRunning = false
 
   // command options
   private var deviceId: String?
   private var outputPath: String?
-  private var format: CaptureFormat = .jpeg
   private var shouldExit = false
 
   func run() {
@@ -60,23 +45,56 @@ class CameraStreamCLI {
     switch command {
     case .list:
       doListCameras()
+
     case .help:
       printUsage()
       exit(0)
+
     case .preview:
       let cameraPreviewController = CameraPreviewController()
       cameraPreviewController.run()
+
     case .conference:
-      break
-    // FIXME: Need to dynamically update host ip addr
+      print("Starting conference mode...")
+
+      // Configuration
+      let host = "127.0.0.1"
+      let port: UInt16 = 8111
+
+      // Create application delegate for the receiver
+      let appDelegate = AppDelegate()
+
+      // Create the sender with the right target
+      let sender = VideoSender(host: host, port: port)
+
+      // Start sender first to ensure it's ready to connect
+      DispatchQueue.global(qos: .userInitiated).async {
+        print("Starting video sender...")
+        sender.start()
+
+        // Keep this thread alive
+        RunLoop.current.run()
+      }
+
+      // Give the sender a moment to initialize
+      Thread.sleep(forTimeInterval: 0.5)
+
+      // Start receiver with UI (this will block as it runs the main app loop)
+      print("Starting video receiver...")
+      appDelegate.run()
     case .sender:
+      print("In Sender")
       let sender = VideoSender(host: "127.0.0.1", port: 8111)
+      print(sender)
       sender.start()
-      RunLoop.main.run()
+      dispatchMain()  // Ensures the CLI keeps running
+
     case .receiver:
+      print("In receiver")
       let appDelegate = AppDelegate()
       appDelegate.run()
     }
+
   }
 
   private func printUsage() {

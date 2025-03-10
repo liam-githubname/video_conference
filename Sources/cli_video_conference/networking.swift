@@ -12,28 +12,36 @@ class VideoReceiver {
     do {
       let parameters = NWParameters.tcp
       listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
+      print("VideoReceiver initialized on port \(port)")
     } catch {
-      fatalError("❌ Failed to create listener: \(error)")
+      print("❌ Failed to create listener: \(error)")
     }
   }
 
   func start() {
-    listener?.newConnectionHandler = { connection in
-      print("🎉 Client connected")
-      connection.start(queue: .main)
+    guard let listener = listener else {
+      print("❌ Cannot start: listener is nil")
+      return
+    }
+
+    listener.stateUpdateHandler = { state in
+      switch state {
+      case .ready:
+        print("✅ Receiver listening on port \(listener.port?.rawValue ?? 0)")
+      case .failed(let error):
+        print("❌ Listener failed: \(error)")
+      default:
+        print("Listener state: \(state)")
+      }
+    }
+
+    listener.newConnectionHandler = { connection in
+      print("🎉 Client connected to receiver")
+      connection.start(queue: DispatchQueue.global(qos: .userInitiated))
       self.receiveFrames(from: connection)
     }
 
-    listener?.start(queue: .main)
-    print("✅ Server listening on port \(listener?.port?.rawValue ?? 0)")
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-      if let boundPort = self.listener?.port?.rawValue {
-        print("✅ Server is officially listening on port \(boundPort)")
-      } else {
-        print("❌ Failed to retrieve bound port")
-      }
-    }
+    listener.start(queue: DispatchQueue.global(qos: .userInitiated))
   }
 
   private func receiveFrames(from connection: NWConnection) {
@@ -67,67 +75,99 @@ class VideoReceiver {
 class VideoSender {
   let connection: NWConnection
   let videoCapture = VideoCapture()
+  private var isConnected = false
 
   init(host: String, port: UInt16) {
     connection = NWConnection(
-      host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)  // ✅ Switch to TCP
+      host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+    print("VideoSender initialized targeting \(host):\(port)")
   }
 
   func start() {
-    connection.stateUpdateHandler = { newState in
+    print("Starting video sender connection...")
+
+    // Set up connection state handling
+    connection.stateUpdateHandler = { [weak self] newState in
+      guard let self = self else { return }
+
       switch newState {
       case .ready:
-        print("✅ Connected to server!")
+        print("✅ Sender connected to server!")
+        self.isConnected = true
         self.startStreaming()
+      case .preparing:
+        print("Sender preparing connection...")
+      case .setup:
+        print("Sender connection setup...")
+      case .waiting(let error):
+        print("⚠️ Sender waiting to connect: \(error)")
       case .failed(let error):
-        print("❌ Connection failed: \(error)")
+        print("❌ Sender connection failed: \(error)")
+        // Try to reconnect after a delay
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+          print("Attempting to reconnect sender...")
+          self.connection.restart()
+        }
+      case .cancelled:
+        print("Sender connection cancelled")
       default:
-        break
+        print("Sender in state: \(newState)")
       }
     }
 
-    connection.start(queue: .main)
+    // Start the connection
+    connection.start(queue: DispatchQueue.global(qos: .userInitiated))
   }
 
   private func startStreaming() {
-    print("in start streaming")
-    videoCapture.frameCallback = { sampleBuffer in
-      print("In frameCallback")
+    print("Starting video capture and streaming...")
+
+    // Set up the frame callback
+    videoCapture.frameCallback = { [weak self] sampleBuffer in
+      guard let self = self, self.isConnected else { return }
+
       if let jpegData = sampleBufferTOJPEGData(sampleBuffer) {
+        // Only send frames when connected
         self.sendFrame(jpegData)
       }
     }
+
+    // Start capturing video
     videoCapture.startCapture()
   }
 
   private func sendFrame(_ frameData: Data) {
-    print("In sendFrame")
+    // Send frame size first, then frame data
     let frameSize = UInt32(frameData.count)
-    var dataToSend = withUnsafeBytes(of: frameSize) { Data($0) }  // Send frame size first
-    dataToSend.append(frameData)  // Append actual frame data
+    var dataToSend = withUnsafeBytes(of: frameSize) { Data($0) }
+    dataToSend.append(frameData)
 
-    connection.send(
+    self.connection.send(
       content: dataToSend,
       completion: .contentProcessed { error in
         if let error = error {
           print("❌ Send error: \(error)")
-        } else {
-          print("📤 Sent frame of size: \(frameData.count) bytes")
         }
       })
+  }
+
+  func stop() {
+    videoCapture.stopCapture()
+    connection.cancel()
   }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
   var window: NSWindow!
   var receiver: VideoReceiver!
+  var imageView: NSImageView!
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    let screenSize = NSScreen.main?.frame.size ?? CGSize(width: 800, height: 600)
+    let initialSize = CGSize(width: 640, height: 480)
 
-    // Create Window
+    // ✅ Create Window
     window = NSWindow(
-      contentRect: CGRect(x: 0, y: 0, width: 640, height: 480),
+      contentRect: CGRect(origin: .zero, size: initialSize),
       styleMask: [.titled, .closable, .resizable, .miniaturizable],
       backing: .buffered,
       defer: false
@@ -136,21 +176,64 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     window.title = "Video Stream"
     window.makeKeyAndOrderFront(nil)
 
-    // Create ImageView
-    let imageView = NSImageView(frame: CGRect(x: 0, y: 0, width: 640, height: 480))
-    imageView.imageScaling = .scaleAxesIndependently
+    // ✅ Create ImageView (Auto-Resizing)
+    imageView = NSImageView(frame: CGRect(origin: .zero, size: initialSize))
+    imageView.imageScaling = .scaleProportionallyUpOrDown  // Keeps aspect ratio
+    imageView.autoresizingMask = [.width, .height]  // Resizes with window
     window.contentView?.addSubview(imageView)
 
-    // Start Video Receiver
+    // ✅ Start Video Receiver
     receiver = VideoReceiver(port: 8111, imageView: imageView)
+    receiver.start()
+
+    // ✅ Listen for window size changes
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(windowResized), name: NSWindow.didResizeNotification, object: window
+    )
+  }
+
+  // ✅ Adjust ImageView when Window Resizes
+  @objc func windowResized() {
+    imageView.frame = window.contentView?.bounds ?? .zero
+  }
+
+  // Add this method to AppDelegate:
+  func setupReceiver() {
+    // Create ImageView
+    imageView = NSImageView(frame: window.contentView?.bounds ?? .zero)
+    imageView.imageScaling = .scaleProportionallyUpOrDown
+    imageView.autoresizingMask = [.width, .height]
+    window.contentView?.addSubview(imageView)
+
+    // Create and start receiver
+    receiver = VideoReceiver(port: 8111, imageView: imageView)
+    print("Starting video receiver on port 8111...")
     receiver.start()
   }
 
+  // And update your run() method:
   func run() {
+    print("Starting AppDelegate run...")
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
-    let delegate = AppDelegate()
-    app.delegate = delegate
+
+    // Create Window
+    let initialSize = CGSize(width: 640, height: 480)
+    window = NSWindow(
+      contentRect: CGRect(origin: .zero, size: initialSize),
+      styleMask: [.titled, .closable, .resizable, .miniaturizable],
+      backing: .buffered,
+      defer: false
+    )
+    window.center()
+    window.title = "Video Stream"
+    window.makeKeyAndOrderFront(nil)
+
+    // Setup receiver before starting app
+    setupReceiver()
+
+    // Set delegate and run
+    app.delegate = self
     app.run()
   }
 }
