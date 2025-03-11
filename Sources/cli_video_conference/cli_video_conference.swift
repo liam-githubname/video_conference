@@ -58,7 +58,13 @@ class CameraStreamCLI {
       print("Starting conference mode...")
 
       // Configuration
-      let host = "127.0.0.1"
+      guard arguments.count > 2 else {
+        print("Usage: \(arguments[1]) <ip_address>")
+        exit(1)
+      }
+
+      let host = arguments[2]
+
       let port: UInt16 = 8111
 
       // Create a single appDelegate to manage the window and UI
@@ -85,7 +91,14 @@ class CameraStreamCLI {
 
     case .sender:
       print("In Sender")
-      let sender = VideoSender(host: "127.0.0.1", port: 8111)
+
+      guard arguments.count > 2 else {
+        print("Usage: \(arguments[1]) <ip_address>")
+        exit(1)
+      }
+
+      let host = arguments[2]
+      let sender = VideoSender(host: host, port: 8111)
       print(sender)
       sender.start()
       dispatchMain()  // Ensures the CLI keeps running
