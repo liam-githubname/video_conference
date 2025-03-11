@@ -61,27 +61,28 @@ class CameraStreamCLI {
       let host = "127.0.0.1"
       let port: UInt16 = 8111
 
-      // Create application delegate for the receiver
+      // Create a single appDelegate to manage the window and UI
       let appDelegate = AppDelegate()
+
+      // Flag to indicate we're in conference mode
+      appDelegate.isConferenceMode = true
 
       // Create the sender with the right target
       let sender = VideoSender(host: host, port: port)
 
-      // Start sender first to ensure it's ready to connect
+      // Store reference to sender in appDelegate for later access
+      appDelegate.videoSender = sender
+
+      // Start sender in background thread
       DispatchQueue.global(qos: .userInitiated).async {
         print("Starting video sender...")
         sender.start()
-
-        // Keep this thread alive
-        RunLoop.current.run()
       }
 
-      // Give the sender a moment to initialize
-      Thread.sleep(forTimeInterval: 0.5)
-
-      // Start receiver with UI (this will block as it runs the main app loop)
-      print("Starting video receiver...")
+      // Start the app with the receiver (this blocks with the main run loop)
+      print("Starting conference mode with integrated receiver...")
       appDelegate.run()
+
     case .sender:
       print("In Sender")
       let sender = VideoSender(host: "127.0.0.1", port: 8111)

@@ -161,41 +161,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   var window: NSWindow!
   var receiver: VideoReceiver!
   var imageView: NSImageView!
-
-  func applicationDidFinishLaunching(_ notification: Notification) {
-    let initialSize = CGSize(width: 640, height: 480)
-
-    // ✅ Create Window
-    window = NSWindow(
-      contentRect: CGRect(origin: .zero, size: initialSize),
-      styleMask: [.titled, .closable, .resizable, .miniaturizable],
-      backing: .buffered,
-      defer: false
-    )
-    window.center()
-    window.title = "Video Stream"
-    window.makeKeyAndOrderFront(nil)
-
-    // ✅ Create ImageView (Auto-Resizing)
-    imageView = NSImageView(frame: CGRect(origin: .zero, size: initialSize))
-    imageView.imageScaling = .scaleProportionallyUpOrDown  // Keeps aspect ratio
-    imageView.autoresizingMask = [.width, .height]  // Resizes with window
-    window.contentView?.addSubview(imageView)
-
-    // ✅ Start Video Receiver
-    receiver = VideoReceiver(port: 8111, imageView: imageView)
-    receiver.start()
-
-    // ✅ Listen for window size changes
-    NotificationCenter.default.addObserver(
-      self, selector: #selector(windowResized), name: NSWindow.didResizeNotification, object: window
-    )
-  }
-
-  // ✅ Adjust ImageView when Window Resizes
-  @objc func windowResized() {
-    imageView.frame = window.contentView?.bounds ?? .zero
-  }
+  var isConferenceMode = false
+  var videoSender: VideoSender?
 
   // Add this method to AppDelegate:
   func setupReceiver() {
@@ -236,4 +203,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     app.delegate = self
     app.run()
   }
+
+  private func setupWindow() {
+    // Create Window
+    let initialSize = CGSize(width: 640, height: 480)
+    window = NSWindow(
+      contentRect: CGRect(origin: .zero, size: initialSize),
+      styleMask: [.titled, .closable, .resizable, .miniaturizable],
+      backing: .buffered,
+      defer: false
+    )
+    window.center()
+    window.title = isConferenceMode ? "Video Conference" : "Video Receiver"
+    window.makeKeyAndOrderFront(nil)
+
+    // Handle window closing to properly clean up
+    // window.delegate = self
+  }
+
+  // Implement NSWindowDelegate
+  func windowWillClose(_ notification: Notification) {
+    // Cleanup resources
+    receiver?.listener?.cancel()
+    videoSender?.stop()
+
+    // Quit the app when window closes
+    NSApp.terminate(nil)
+  }
+
 }
