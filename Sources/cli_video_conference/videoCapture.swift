@@ -65,24 +65,7 @@ class VideoCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
   }
 }
 
-// Helper function to convert CMSampleBuffer to JPEG Data
-// func sampleBufferTOJPEGData(_ sampleBuffer: CMSampleBuffer) -> Data? {
-//     guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-//         return nil
-//     }
-//
-//     let ciImage = CIImage(cvPixelBuffer: imageBuffer)
-//     let context = CIContext()
-//     guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
-//         return nil
-//     }
-//
-//     let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
-//     return bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
-// }
-
 func sampleBufferTOJPEGData(_ sampleBuffer: CMSampleBuffer) -> Data? {
-  print("In sampleBuffer")
   guard let imageBufferr = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
 
   let ciImage = CIImage(cvPixelBuffer: imageBufferr)

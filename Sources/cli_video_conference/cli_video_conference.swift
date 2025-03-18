@@ -11,6 +11,7 @@ enum Command: String {
   case conference = "conference"
   case sender = "sender"
   case receiver = "receiver"
+  case test = "test"
 }
 
 // main app class
@@ -55,42 +56,22 @@ class CameraStreamCLI {
       cameraPreviewController.run()
 
     case .conference:
-      print("Starting conference mode...")
 
-      // Configuration
-      guard arguments.count > 2 else {
-        print("Usage: \(arguments[1]) <ip_address>")
-        exit(1)
+      if CommandLine.arguments[2] == "-h" {
+        // Run as host (server)
+        let appDelegate = AppDelegate()
+        appDelegate.isConferenceMode = true  // Set to true for bidirectional video
+        appDelegate.runAsHost(controlPort: 8112, videoPort: 8223)
       }
 
-      let host = arguments[2]
-
-      let port: UInt16 = 8111
-
-      // Create a single appDelegate to manage the window and UI
-      let appDelegate = AppDelegate()
-
-      // Flag to indicate we're in conference mode
-      appDelegate.isConferenceMode = true
-
-      // Create the sender with the right target
-      let sender = VideoSender(host: host, port: port)
-
-      // Store reference to sender in appDelegate for later access
-      appDelegate.videoSender = sender
-
-      // Start sender in background thread
-      DispatchQueue.global(qos: .userInitiated).async {
-        print("Starting video sender...")
-        sender.start()
+      if CommandLine.arguments[2] == "-c" {
+        // Run as client
+        let appDelegate = AppDelegate()
+        appDelegate.isConferenceMode = true
+        appDelegate.runAsClient(host: "192.168.1.206", controlPort: 8111, videoPort: 8222)
       }
-
-      // Start the app with the receiver (this blocks with the main run loop)
-      print("Starting conference mode with integrated receiver...")
-      appDelegate.run()
 
     case .sender:
-      print("In Sender")
 
       guard arguments.count > 2 else {
         print("Usage: \(arguments[1]) <ip_address>")
@@ -98,15 +79,20 @@ class CameraStreamCLI {
       }
 
       let host = arguments[2]
-      let sender = VideoSender(host: host, port: 8111)
-      print(sender)
-      sender.start()
-      dispatchMain()  // Ensures the CLI keeps running
+
+    // let tcpsocket = TCPConnection.init(host: host, port: 8111)
+
+    // let sender = VideoSender(connection: tcpsocket.connection)
+    // sender.start()
+    // dispatchMain()  // Ensures the CLI keeps running
 
     case .receiver:
-      print("In receiver")
-      let appDelegate = AppDelegate()
-      appDelegate.run()
+
+      break
+    case .test:
+      // Run main app loop
+      break
+
     }
 
   }
