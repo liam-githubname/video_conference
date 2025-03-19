@@ -469,6 +469,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   var connectionManager: ConnectionManager!
   var receiver: VideoReceiver?
   var sender: VideoSender?
+  var videoCapture: VideoCapture?
 
   // Configuration
   var isConferenceMode = false
@@ -490,11 +491,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     connectionManager.videoSenderDelegate = self
     connectionManager.startAsHost()
 
-    // Set up video sender if in conference mode
-    if isConferenceMode {
-      setupVideoCapture()
-    }
-
     // Start the app
     let app = NSApplication.shared
     app.delegate = self
@@ -515,11 +511,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     connectionManager.videoReceiverDelegate = self
     connectionManager.videoSenderDelegate = self
     connectionManager.connectToHost(host: host)
-
-    // Set up video sender if in conference mode
-    if isConferenceMode {
-      setupVideoCapture()
-    }
 
     // Start the app
     let app = NSApplication.shared
@@ -550,15 +541,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     window.contentView?.addSubview(imageView)
   }
 
-  private func setupVideoCapture() {
-    // Here you would initialize your video capture system
-    // This is a placeholder - actual implementation depends on your video capture code
-    print("Setting up video capture for sending...")
-    // videoSender would be created by ConnectionManager when connection is ready
-  }
-
   // NSWindowDelegate method
   func windowWillClose(_ notification: Notification) {
+    // Stop video capture
+    videoCapture?.stopCapture()
+    videoCapture = nil
+
     // Clean up resources
     connectionManager.cleanup()
 
@@ -581,12 +569,26 @@ extension AppDelegate: VideoReceiverDelegate {
 // MARK: - Video Sender Delegate
 extension AppDelegate: VideoSenderDelegate {
   func readyToSendFrames(_ sender: VideoSender) {
-    // Here you would start sending frames from your camera
     print("Ready to send video frames")
-    // Example (pseudo-code):
-    // videoCapture.startCapturing { frame in
-    //   sender.sendFrame(frame)
-    // }
+
+    // Initialize the video capture if not already done
+    if videoCapture == nil {
+      videoCapture = VideoCapture()
+
+      // Set up the frame callback
+      videoCapture?.frameCallback = { [weak self] sampleBuffer in
+        guard let self = self else { return }
+
+        // Convert CMSampleBuffer to JPEG Data
+        if let jpegData = sampleBufferTOJPEGData(sampleBuffer) {
+          // Send the frame data over the network
+          self.sender?.sendFrame(jpegData)
+        }
+      }
+
+      // Start capturing
+      videoCapture?.startCapture()
+    }
   }
 }
 
@@ -782,7 +784,8 @@ class ConnectionManager {
       switch state {
       case .ready:
         print("✅ Control connection established: \(connection.endpoint)")
-        self.receiveVideoPort(on: connection)
+      // FIXME: there is no need to exchange a video port
+      // self.receiveVideoPort(on: connection)
       case .failed(let error):
         print("❌ Control connection failed: \(error)")
       default:
@@ -836,15 +839,16 @@ class ConnectionManager {
           self.outgoingStream = connection
 
           // Send our video port to the other side
-          self.sendPort(videoPort: self.videoPort) { success in
-            if success {
-              print("Successfully sent port")
-              // Once control connection is established, connect to video port
-              self.createConnection(host: host, port: self.videoPort)
-            } else {
-              print("Failed to send port... ending process")
-            }
-          }
+          // self.sendPort(videoPort: self.videoPort) { success in
+          //   if success {
+          //     print("Successfully sent port")
+          //     // Once control connection is established, connect to video port
+          //     self.createConnection(host: host, port: self.videoPort)
+          //   } else {
+          //     print("Failed to send port... ending process")
+          //   }
+          // }
+
         } else if port == self.videoPort {
           self.isVideoConnected = true
 
@@ -870,57 +874,61 @@ class ConnectionManager {
     connection.start(queue: DispatchQueue.global(qos: .userInitiated))
   }
 
+  // FIXME: Not needed as the connection will not be sharing ports anymore
+
   // Send port information
-  func sendPort(videoPort: UInt16, completion: @escaping (Bool) -> Void) {
-    guard let connection = self.outgoingStream else {
-      completion(false)
-      return
-    }
+  // func sendPort(videoPort: UInt16, completion: @escaping (Bool) -> Void) {
+  //   guard let connection = self.outgoingStream else {
+  //     completion(false)
+  //     return
+  //   }
+  //
+  //   let portString = "\(videoPort)\n"
+  //   let data = portString.data(using: .utf8)!
+  //
+  //   connection.send(
+  //     content: data,
+  //     completion: .contentProcessed { error in
+  //       if let error = error {
+  //         print("❌ Failed to send port: \(error)")
+  //         completion(false)
+  //       } else {
+  //         print("✅ Port \(videoPort) sent successfully")
+  //         completion(true)
+  //       }
+  //     })
+  // }
 
-    let portString = "\(videoPort)\n"
-    let data = portString.data(using: .utf8)!
-
-    connection.send(
-      content: data,
-      completion: .contentProcessed { error in
-        if let error = error {
-          print("❌ Failed to send port: \(error)")
-          completion(false)
-        } else {
-          print("✅ Port \(videoPort) sent successfully")
-          completion(true)
-        }
-      })
-  }
+  // FIXME: This isn't needed if I am going to always stream to the same port
 
   // Receive port information
-  private func receiveVideoPort(on connection: NWConnection) {
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) {
-      [weak self]
-      data, _, isComplete, error in
-      guard let self = self else { return }
-
-      if let data = data, !data.isEmpty {
-        let message = String(decoding: data, as: UTF8.self)
-        print("📩 Received: \(message)")
-
-        if let receivedPort = UInt16(message.trimmingCharacters(in: .whitespacesAndNewlines)) {
-          print("📡 Received peer's video port: \(receivedPort)")
-          // We don't need to open a listener since we already have one
-        }
-      }
-
-      if isComplete {
-        print("🔴 Connection closed by peer")
-        connection.cancel()
-      } else if let error = error {
-        print("❌ Receive error: \(error)")
-        connection.cancel()
-      } else {
-        self.receiveVideoPort(on: connection)  // Keep receiving data
-      }
-    }
-  }
+  // private func receiveVideoPort(on connection: NWConnection) {
+  //   connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) {
+  //     [weak self]
+  //     data, _, isComplete, error in
+  //     guard let self = self else { return }
+  //
+  //     if let data = data, !data.isEmpty {
+  //       let message = String(decoding: data, as: UTF8.self)
+  //       print("📩 Received: \(message)")
+  //
+  //       if let receivedPort = UInt16(message.trimmingCharacters(in: .whitespacesAndNewlines)) {
+  //         print("📡 Received peer's video port: \(receivedPort)")
+  //         // We don't need to open a listener since we already have one
+  //       }
+  //     }
+  //
+  //     if isComplete {
+  //       print("🔴 Connection closed by peer")
+  //       connection.cancel()
+  //     } else if let error = error {
+  //       print("❌ Receive error: \(error)")
+  //       connection.cancel()
+  //     } else {
+  //       self.receiveVideoPort(on: connection)  // Keep receiving data
+  //     }
+  //   }
+  // }
 
   // Clean up resources
   func cleanup() {

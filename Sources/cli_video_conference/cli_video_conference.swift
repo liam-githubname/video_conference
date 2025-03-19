@@ -57,35 +57,24 @@ class CameraStreamCLI {
 
     case .conference:
 
-      if CommandLine.arguments[2] == "-h" {
+      if arguments.contains("-h") {
         // Run as host (server)
         let appDelegate = AppDelegate()
         appDelegate.isConferenceMode = true  // Set to true for bidirectional video
-        appDelegate.runAsHost(controlPort: 8112, videoPort: 8223)
+        appDelegate.runAsHost(controlPort: 8111, videoPort: 8222)
       }
 
-      if CommandLine.arguments[2] == "-c" {
+      if arguments.contains("-c") {
         // Run as client
+        let host = arguments[3]
         let appDelegate = AppDelegate()
         appDelegate.isConferenceMode = true
-        appDelegate.runAsClient(host: "192.168.1.206", controlPort: 8111, videoPort: 8222)
+        appDelegate.runAsClient(host: host, controlPort: 8111, videoPort: 8222)
       }
 
     case .sender:
 
-      guard arguments.count > 2 else {
-        print("Usage: \(arguments[1]) <ip_address>")
-        exit(1)
-      }
-
-      let host = arguments[2]
-
-    // let tcpsocket = TCPConnection.init(host: host, port: 8111)
-
-    // let sender = VideoSender(connection: tcpsocket.connection)
-    // sender.start()
-    // dispatchMain()  // Ensures the CLI keeps running
-
+      break
     case .receiver:
 
       break
