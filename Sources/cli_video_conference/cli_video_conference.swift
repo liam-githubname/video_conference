@@ -8,10 +8,8 @@ enum Command: String {
   case help = "help"
   case list = "list"
   case preview = "preview"
-  case conference = "conference"
-  case sender = "sender"
-  case receiver = "receiver"
-  case test = "test"
+  case host = "host"
+  case client = "client"
 }
 
 // main app class
@@ -55,33 +53,18 @@ class CameraStreamCLI {
       let cameraPreviewController = CameraPreviewController()
       cameraPreviewController.run()
 
-    case .conference:
+    case .host:
 
-      if arguments.contains("-h") {
-        // Run as host (server)
-        let appDelegate = AppDelegate()
-        appDelegate.isConferenceMode = true  // Set to true for bidirectional video
-        appDelegate.runAsHost(controlPort: 8111, videoPort: 8222)
-      }
+      // Run as host (server)
+      let appDelegate = AppDelegate()
+      appDelegate.isConferenceMode = true  // Set to true for bidirectional video
+      appDelegate.runAsHost(controlPort: 8111, videoPort: 8222)
 
-      if arguments.contains("-c") {
-        // Run as client
-        let host = arguments[3]
-        let appDelegate = AppDelegate()
-        appDelegate.isConferenceMode = true
-        appDelegate.runAsClient(host: host, controlPort: 8111, videoPort: 8222)
-      }
-
-    case .sender:
-
-      break
-    case .receiver:
-
-      break
-    case .test:
-      // Run main app loop
-      break
-
+    case .client:
+      let host = arguments[3]
+      let appDelegate = AppDelegate()
+      appDelegate.isConferenceMode = true
+      appDelegate.runAsClient(host: host, controlPort: 8111, videoPort: 8222)
     }
 
   }

@@ -827,9 +827,7 @@ class ConnectionManager {
       port: NWEndpoint.Port(rawValue: port)!,
       using: .tcp)
 
-    connection.stateUpdateHandler = { [weak self] state in
-      guard let self = self else { return }
-
+    connection.stateUpdateHandler = { [self] state in
       switch state {
       case .ready:
         print("✅ Connected to \(host) on port \(port)")
@@ -871,7 +869,8 @@ class ConnectionManager {
       }
     }
 
-    connection.start(queue: DispatchQueue.global(qos: .userInitiated))
+    connection.start(queue: .main)
+    print("connection started")
   }
 
   // FIXME: Not needed as the connection will not be sharing ports anymore
