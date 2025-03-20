@@ -839,15 +839,15 @@ class ConnectionManager {
           self.outgoingStream = connection
 
           // Send our video port to the other side
-          // self.sendPort(videoPort: self.videoPort) { success in
-          //   if success {
-          //     print("Successfully sent port")
-          //     // Once control connection is established, connect to video port
-          //     self.createConnection(host: host, port: self.videoPort)
-          //   } else {
-          //     print("Failed to send port... ending process")
-          //   }
-          // }
+          self.sendPort(videoPort: self.videoPort) { success in
+            if success {
+              print("Successfully sent port")
+              // Once control connection is established, connect to video port
+              self.createConnection(host: host, port: self.videoPort)
+            } else {
+              print("Failed to send port... ending process")
+            }
+          }
 
         } else if port == self.videoPort {
           self.isVideoConnected = true
@@ -877,58 +877,58 @@ class ConnectionManager {
   // FIXME: Not needed as the connection will not be sharing ports anymore
 
   // Send port information
-  // func sendPort(videoPort: UInt16, completion: @escaping (Bool) -> Void) {
-  //   guard let connection = self.outgoingStream else {
-  //     completion(false)
-  //     return
-  //   }
-  //
-  //   let portString = "\(videoPort)\n"
-  //   let data = portString.data(using: .utf8)!
-  //
-  //   connection.send(
-  //     content: data,
-  //     completion: .contentProcessed { error in
-  //       if let error = error {
-  //         print("❌ Failed to send port: \(error)")
-  //         completion(false)
-  //       } else {
-  //         print("✅ Port \(videoPort) sent successfully")
-  //         completion(true)
-  //       }
-  //     })
-  // }
+  func sendPort(videoPort: UInt16, completion: @escaping (Bool) -> Void) {
+    guard let connection = self.outgoingStream else {
+      completion(false)
+      return
+    }
+
+    let portString = "\(videoPort)\n"
+    let data = portString.data(using: .utf8)!
+
+    connection.send(
+      content: data,
+      completion: .contentProcessed { error in
+        if let error = error {
+          print("❌ Failed to send port: \(error)")
+          completion(false)
+        } else {
+          print("✅ Port \(videoPort) sent successfully")
+          completion(true)
+        }
+      })
+  }
 
   // FIXME: This isn't needed if I am going to always stream to the same port
 
   // Receive port information
-  // private func receiveVideoPort(on connection: NWConnection) {
-  //   connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) {
-  //     [weak self]
-  //     data, _, isComplete, error in
-  //     guard let self = self else { return }
-  //
-  //     if let data = data, !data.isEmpty {
-  //       let message = String(decoding: data, as: UTF8.self)
-  //       print("📩 Received: \(message)")
-  //
-  //       if let receivedPort = UInt16(message.trimmingCharacters(in: .whitespacesAndNewlines)) {
-  //         print("📡 Received peer's video port: \(receivedPort)")
-  //         // We don't need to open a listener since we already have one
-  //       }
-  //     }
-  //
-  //     if isComplete {
-  //       print("🔴 Connection closed by peer")
-  //       connection.cancel()
-  //     } else if let error = error {
-  //       print("❌ Receive error: \(error)")
-  //       connection.cancel()
-  //     } else {
-  //       self.receiveVideoPort(on: connection)  // Keep receiving data
-  //     }
-  //   }
-  // }
+  private func receiveVideoPort(on connection: NWConnection) {
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 1024) {
+      [weak self]
+      data, _, isComplete, error in
+      guard let self = self else { return }
+
+      if let data = data, !data.isEmpty {
+        let message = String(decoding: data, as: UTF8.self)
+        print("📩 Received: \(message)")
+
+        if let receivedPort = UInt16(message.trimmingCharacters(in: .whitespacesAndNewlines)) {
+          print("📡 Received peer's video port: \(receivedPort)")
+          // We don't need to open a listener since we already have one
+        }
+      }
+
+      if isComplete {
+        print("🔴 Connection closed by peer")
+        connection.cancel()
+      } else if let error = error {
+        print("❌ Receive error: \(error)")
+        connection.cancel()
+      } else {
+        self.receiveVideoPort(on: connection)  // Keep receiving data
+      }
+    }
+  }
 
   // Clean up resources
   func cleanup() {
