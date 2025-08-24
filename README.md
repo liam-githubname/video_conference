@@ -1,8 +1,6 @@
 
 # LAN Video Conference Tool
 
-### **Testing has become an issue and I am trying to find a collaborator who would like to help with testing.
-
 **Lets you begin a video conference over a local network.** 
 
 ### **Summary**
